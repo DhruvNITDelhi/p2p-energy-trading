@@ -43,47 +43,59 @@ async function getContract() {
 
 // --- API ROUTES ---
 
-// 1. GET BALANCE ROUTE (This fixes the "--" on the UI)
+// 1. GET BALANCE ROUTE
 app.get('/api/node/:id', async (req, res) => {
     const { contract, gateway, client } = await getContract();
     try {
         const resultBytes = await contract.evaluateTransaction('GetNode', req.params.id);
         res.json(JSON.parse(new TextDecoder().decode(resultBytes)));
-    } catch (e) { 
-        res.status(500).send({error: e.message}); 
-    } finally { 
-        gateway.close(); client.close(); 
-    }
+    } catch (e) { res.status(500).send({error: e.message}); }
+    finally { gateway.close(); client.close(); }
 });
 
-// 2. SECURE TRADE ROUTE
-app.post('/api/trade', async (req, res) => {
+// 2. GET ORDER BOOK ROUTE
+app.get('/api/orderbook', async (req, res) => {
+    const { contract, gateway, client } = await getContract();
+    try {
+        const resultBytes = await contract.evaluateTransaction('GetOrderBook');
+        const data = new TextDecoder().decode(resultBytes);
+        res.json(data ? JSON.parse(data) : []);
+    } catch (e) { res.status(500).send({error: e.message}); }
+    finally { gateway.close(); client.close(); }
+});
+
+// 3. PLACE LIMIT ORDER ROUTE
+app.post('/api/order', async (req, res) => {
     if (req.headers['authorization'] !== AUTH_TOKEN) return res.status(401).json({error: "Unauthorized"});
     const { contract, gateway, client } = await getContract();
     try {
-        const { seller, buyer, energy, tokens } = req.body;
-        await contract.submitTransaction('TradeEnergy', seller, buyer, energy.toString(), tokens.toString());
-        res.json({ message: "Trade Success!" });
-    } catch (e) { 
-        res.status(500).send({error: e.message}); 
-    } finally { 
-        gateway.close(); client.close(); 
-    }
+        const { id, owner, orderType, price, quantity } = req.body;
+        await contract.submitTransaction('PlaceOrder', id, owner, orderType, price.toString(), quantity.toString());
+        res.json({ message: "Order Placed & Matching Engine Triggered!" });
+    } catch (e) { res.status(500).send({error: e.message}); }
+    finally { gateway.close(); client.close(); }
 });
 
-// 3. SECURE RECHARGE ROUTE (Admin Only)
+// 4. SECURE RECHARGE ROUTE
 app.post('/api/recharge', async (req, res) => {
     if (req.headers['authorization'] !== AUTH_TOKEN) return res.status(401).json({error: "Unauthorized"});
     const { contract, gateway, client } = await getContract();
     try {
-        const { id, energy, tokens } = req.body;
-        await contract.submitTransaction('RechargeNode', id, energy.toString(), tokens.toString());
+        const { id, amount } = req.body;
+        await contract.submitTransaction('RechargeNode', id, amount.toString());
         res.json({ message: "Recharge Success!" });
-    } catch (e) { 
-        res.status(500).send({error: e.message}); 
-    } finally { 
-        gateway.close(); client.close(); 
-    }
+    } catch (e) { res.status(500).send({error: e.message}); }
+    finally { gateway.close(); client.close(); }
+});
+
+// 5. GET TRANSACTION HISTORY
+app.get('/api/history/:id', async (req, res) => {
+    const { contract, gateway, client } = await getContract();
+    try {
+        const resultBytes = await contract.evaluateTransaction('GetNodeHistory', req.params.id);
+        res.json(JSON.parse(new TextDecoder().decode(resultBytes)));
+    } catch (e) { res.status(500).send({error: e.message}); }
+    finally { gateway.close(); client.close(); }
 });
 
 // Start Server

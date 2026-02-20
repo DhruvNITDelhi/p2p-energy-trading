@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>EnergyConnect Pro | Order Book</title>
+    <title>EnergyConnect Pro | Secure DEX</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-slate-200 font-sans p-6 md:p-12">
@@ -9,32 +9,28 @@
 
         <!-- HEADER -->
         <header class="flex justify-between items-center mb-8 border-b border-slate-800 pb-6">
-            <h1 class="text-4xl font-black text-emerald-400">ENERGY-DEX <span class="text-slate-500 text-xl font-light">v4.0</span></h1>
+            <h1 class="text-4xl font-black text-emerald-400">ENERGY-DEX <span class="text-slate-500 text-xl font-light">v5.0 Enterprise</span></h1>
             <div id="user-info" class="hidden flex items-center gap-4">
                 <span id="welcome-msg" class="text-slate-400 text-sm font-bold"></span>
+                <span id="role-badge" class="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-400"></span>
                 <button onclick="logout()" class="text-red-400 text-xs border border-red-900/50 p-2 rounded hover:bg-red-900/20">LOGOUT</button>
             </div>
         </header>
 
         <!-- LOGIN SCREEN -->
         <div id="login-section" class="max-w-md mx-auto mt-20 bg-slate-900 p-8 rounded-3xl border border-slate-800 shadow-2xl">
-            <h2 class="text-2xl font-bold text-white mb-6 text-center">Login to Trade</h2>
+            <h2 class="text-2xl font-bold text-white mb-6 text-center">Secure Login</h2>
             <div class="space-y-4">
-                <input type="text" id="login-user" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white" placeholder="Username (e.g. node1)">
+                <input type="text" id="login-user" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white" placeholder="Username">
                 <input type="password" id="login-pass" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white" placeholder="Password">
-                <button onclick="login()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl transition-all">LOGIN</button>
-                <div class="flex justify-between items-center text-xs text-slate-500 mt-4">
-                    <span>New here?</span>
-                    <button onclick="register()" class="text-emerald-400 hover:text-emerald-300">Create Account</button>
-                </div>
+                <button onclick="login()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)]">AUTHENTICATE</button>
                 <p id="login-status" class="text-center text-red-500 text-sm h-4"></p>
             </div>
         </div>
 
-        <!-- DASHBOARD (Hidden) -->
-        <div id="dashboard-section" class="hidden">
-
-            <!-- WALLET CARD -->
+        <!-- USER DASHBOARD -->
+        <div id="user-dashboard" class="hidden">
+            <!-- Wallet -->
             <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl mb-8">
                 <h3 class="text-slate-400 font-bold text-xs uppercase mb-4">My Wallet</h3>
                 <div class="flex justify-between border-b border-slate-800 pb-3 mb-3">
@@ -47,93 +43,89 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <!-- ORDER FORM -->
-                <div class="col-span-1 flex flex-col gap-6">
-                    <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
-                        <h2 class="text-white font-bold mb-6">Place Limit Order</h2>
-                        <select id="order-type" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white mb-4">
-                            <option value="BUY">Buy Energy (Bid)</option>
-                            <option value="SELL">Sell Energy (Ask)</option>
-                        </select>
-                        <input type="number" id="order-qty" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white mb-4" placeholder="Quantity (kWh)">
-                        <input type="number" id="order-price" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white mb-6" placeholder="Price per kWh (₮)">
-
-                        <button onclick="placeOrder()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all">SUBMIT ORDER</button>
-                        <p id="order-status" class="mt-4 text-center text-xs text-slate-500 h-4"></p>
-                    </div>
-
-                    <!-- RECHARGE (Admin) -->
-                    <div class="bg-slate-900 border border-purple-900/50 rounded-3xl p-6 shadow-[0_0_15px_rgba(168,85,247,0.15)]">
-                        <h2 class="text-purple-400 font-bold mb-4 flex items-center">🛡️ Admin Recharge</h2>
-                        <input type="text" id="recharge-target" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white mb-4" placeholder="Target User ID">
-                        <input type="number" id="recharge-amount" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white mb-6" placeholder="Amount (Tokens/kWh)">
-                        <button onclick="executeRecharge()" class="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-xl transition-all">MINT RESOURCES</button>
-                        <p id="recharge-status" class="mt-4 text-center text-xs text-slate-500 h-4"></p>
-                    </div>
+            <!-- Trading -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                    <h2 class="text-white font-bold mb-6">Trade Energy</h2>
+                    <select id="order-type" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white mb-4"><option value="BUY">Buy Energy (Bid)</option><option value="SELL">Sell Energy (Ask)</option></select>
+                    <input type="number" id="order-qty" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white mb-4" placeholder="Quantity (kWh)">
+                    <input type="number" id="order-price" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white mb-6" placeholder="Price per kWh (₮)">
+                    <button onclick="placeOrder()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all">SUBMIT ORDER</button>
+                    <p id="order-status" class="mt-4 text-center text-xs text-slate-500 h-4"></p>
                 </div>
 
-                <!-- ORDER BOOK -->
-                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 col-span-2">
-                    <h2 class="text-white font-bold mb-6">Live Order Book (Off-Chain Matcher)</h2>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <h3 class="text-emerald-500 text-xs font-bold mb-2 uppercase border-b border-slate-800 pb-2">Bids (Buying)</h3>
-                            <div class="grid grid-cols-2 text-[10px] text-slate-500 mb-2"><span class="text-left">QTY</span><span class="text-right">PRICE</span></div>
-                            <div id="bids-list" class="space-y-1"></div>
-                        </div>
-                        <div>
-                            <h3 class="text-red-500 text-xs font-bold mb-2 uppercase border-b border-slate-800 pb-2">Asks (Selling)</h3>
-                            <div class="grid grid-cols-2 text-[10px] text-slate-500 mb-2"><span class="text-left">PRICE</span><span class="text-right">QTY</span></div>
-                            <div id="asks-list" class="space-y-1"></div>
-                        </div>
-                    </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                    <h2 class="text-white font-bold mb-6">Market Activity</h2>
+                    <div class="h-64 overflow-y-auto space-y-2" id="user-order-book-list"></div>
                 </div>
             </div>
 
-            <!-- HISTORY -->
+            <!-- History -->
             <div class="mt-8 bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                <h2 class="text-white font-bold mb-6">My Audit Trail</h2>
+                <div class="overflow-x-auto"><table class="w-full text-left text-sm text-slate-400"><tbody id="user-history-list"></tbody></table></div>
+            </div>
+        </div>
+
+        <!-- ADMIN DASHBOARD -->
+        <div id="admin-dashboard" class="hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                <!-- Oracle Control -->
+                <div class="bg-slate-900 border border-purple-900/50 rounded-3xl p-6 shadow-[0_0_30px_rgba(168,85,247,0.1)]">
+                    <h2 class="text-purple-400 font-bold mb-4 flex items-center gap-2">🔮 Oracle Command Center</h2>
+                    <div class="space-y-4">
+                        <input type="text" id="mint-target" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white" placeholder="Target Node ID">
+                        <input type="number" id="mint-amount" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white" placeholder="Amount to Mint">
+                        <button onclick="executeMint()" class="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-xl transition-all">MINT ASSETS (ABAC)</button>
+                        <p id="mint-status" class="text-center text-xs text-slate-500 h-4"></p>
+                    </div>
+                </div>
+
+                <!-- User Registration -->
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                    <h2 class="text-white font-bold mb-4">Register New User</h2>
+                    <div class="space-y-4">
+                        <input type="text" id="reg-user" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white" placeholder="New Username">
+                        <input type="password" id="reg-pass" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white" placeholder="New Password">
+                        <select id="reg-role" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white"><option value="user">User Role</option><option value="admin">Admin Role</option></select>
+                        <button onclick="registerUser()" class="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl transition-all">REGISTER IDENTITY</button>
+                        <p id="reg-status" class="text-center text-xs text-slate-500 h-4"></p>
+                    </div>
+                </div>
+
+                 <!-- Global Stats -->
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-col justify-center items-center">
+                    <h2 class="text-slate-500 text-xs font-bold uppercase tracking-widest mb-2">Total Registered Nodes</h2>
+                    <p class="text-6xl font-black text-white" id="total-nodes">--</p>
+                </div>
+            </div>
+
+            <!-- Global User Table -->
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
                 <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-white font-bold">My Transaction History</h2>
-                    <button onclick="fetchHistory()" class="text-xs text-slate-500 hover:text-white">Refresh</button>
+                    <h2 class="text-white font-bold">Global Ledger State</h2>
+                    <button onclick="fetchGlobalUsers()" class="text-xs text-emerald-500 hover:text-emerald-400">Sync Ledger</button>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-left text-sm text-slate-400">
                         <thead class="text-xs text-slate-500 uppercase bg-slate-950/50">
-                            <tr><th class="p-3">Timestamp</th><th class="p-3">Tx ID</th><th class="p-3">Energy</th><th class="p-3">Tokens</th></tr>
+                            <tr><th class="p-3">Node ID</th><th class="p-3">Role/Owner</th><th class="p-3">Energy</th><th class="p-3">Tokens</th><th class="p-3">Locked Escrow</th><th class="p-3">Last Action</th></tr>
                         </thead>
-                        <tbody id="history-list"></tbody>
+                        <tbody id="global-user-list"></tbody>
                     </table>
                 </div>
             </div>
         </div>
+
     </div>
 
     <script>
         const API = "http://localhost:3000/api";
         let TOKEN = localStorage.getItem('token');
         let USERNAME = localStorage.getItem('username');
+        let ROLE = localStorage.getItem('role');
 
-        // --- AUTH ---
-        if(TOKEN && USERNAME) showDashboard();
-
-        async function register() {
-            const u = document.getElementById('login-user').value;
-            const p = document.getElementById('login-pass').value;
-            const status = document.getElementById('login-status');
-            if(!u || !p) { status.innerText = "Enter credentials"; return; }
-
-            try {
-                const res = await fetch(`${API}/auth/register`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: u, password: p })
-                });
-                const data = await res.json();
-                status.innerText = res.ok ? "✅ Registered! Please Login." : `❌ ${data.error}`;
-                status.className = res.ok ? "text-center text-emerald-500 text-sm h-4" : "text-center text-red-500 text-sm h-4";
-            } catch(e) { status.innerText = "Network Error"; }
-        }
+        if(TOKEN && USERNAME) initApp();
 
         async function login() {
             const u = document.getElementById('login-user').value;
@@ -151,29 +143,35 @@
                 if(res.ok) {
                     TOKEN = data.token;
                     USERNAME = data.username;
+                    ROLE = data.role;
                     localStorage.setItem('token', TOKEN);
                     localStorage.setItem('username', USERNAME);
-                    showDashboard();
+                    localStorage.setItem('role', ROLE);
+                    initApp();
                 } else {
                     status.innerText = `❌ ${data.error}`;
                 }
             } catch(e) { status.innerText = "Network Error"; }
         }
 
-        function logout() {
-            localStorage.clear();
-            location.reload();
-        }
+        function logout() { localStorage.clear(); location.reload(); }
 
-        function showDashboard() {
+        function initApp() {
             document.getElementById('login-section').classList.add('hidden');
-            document.getElementById('dashboard-section').classList.remove('hidden');
             document.getElementById('user-info').classList.remove('hidden');
-            document.getElementById('welcome-msg').innerText = `Welcome, ${USERNAME}`;
-            startPolling();
+            document.getElementById('welcome-msg').innerText = USERNAME;
+            document.getElementById('role-badge').innerText = ROLE;
+
+            if(ROLE === 'admin') {
+                document.getElementById('admin-dashboard').classList.remove('hidden');
+                document.getElementById('role-badge').className = "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest bg-purple-900/30 text-purple-400 border border-purple-500/30";
+                startAdminPolling();
+            } else {
+                document.getElementById('user-dashboard').classList.remove('hidden');
+                startUserPolling();
+            }
         }
 
-        // --- DATA FETCHING ---
         async function fetchWithAuth(url, options = {}) {
             if(!options.headers) options.headers = {};
             options.headers['Authorization'] = `Bearer ${TOKEN}`;
@@ -182,96 +180,111 @@
             return res;
         }
 
-        async function refreshData() {
-            if(!TOKEN) return;
-
-            // 1. Get My Balance
+        // --- USER FUNCTIONS ---
+        async function refreshUserData() {
+            // Balance
             const res = await fetchWithAuth(`${API}/node/me`);
             if(res.ok) {
                 const data = await res.json();
                 document.getElementById('my-energy').innerText = data.EnergyBalance;
                 document.getElementById('my-tokens').innerText = data.TokenBalance;
-                document.getElementById('my-locked-energy').innerText = data.LockedEnergy || 0;
-                document.getElementById('my-locked-tokens').innerText = data.LockedTokens || 0;
+                document.getElementById('my-locked-energy').innerText = data.LockedEnergy;
+                document.getElementById('my-locked-tokens').innerText = data.LockedTokens;
             }
-
-            // 2. Get Order Book (Public)
+            // Order Book (For User View)
             const resOB = await fetch(`${API}/orderbook`);
             if(resOB.ok) {
                 const orders = await resOB.json();
-                const bids = orders.filter(o => o.OrderType === 'BUY').sort((a,b) => b.price - a.price);
-                const asks = orders.filter(o => o.OrderType === 'SELL').sort((a,b) => a.price - b.price);
-
-                document.getElementById('bids-list').innerHTML = bids.map(b => `<div class="grid grid-cols-2 text-sm text-emerald-400 bg-emerald-500/10 p-1 rounded"><span class="text-left">${b.quantity}</span><span class="text-right font-bold">${b.price}</span></div>`).join('');
-                document.getElementById('asks-list').innerHTML = asks.map(a => `<div class="grid grid-cols-2 text-sm text-red-400 bg-red-500/10 p-1 rounded"><span class="text-left font-bold">${a.price}</span><span class="text-right">${a.quantity}</span></div>`).join('');
+                document.getElementById('user-order-book-list').innerHTML = orders.map(o =>
+                    `<div class="flex justify-between text-xs p-2 bg-slate-950 rounded mb-1 border-l-2 ${o.OrderType === 'BUY' ? 'border-emerald-500' : 'border-red-500'}">
+                        <span>${o.OrderType} ${o.quantity} kWh</span>
+                        <span class="font-bold">${o.price} ₮</span>
+                    </div>`
+                ).join('');
+            }
+            // History
+            const resHist = await fetchWithAuth(`${API}/history/${USERNAME}`);
+            if(resHist.ok) {
+                let data = await resHist.json();
+                data.sort((a, b) => new Date(b.Timestamp) - new Date(a.Timestamp));
+                document.getElementById('user-history-list').innerHTML = data.slice(0, 5).map(h => `
+                    <tr class="border-b border-slate-800/50"><td class="p-2">${h.Record.LastAction}</td><td class="p-2 font-mono text-xs text-slate-500">${h.TxId.substring(0,8)}...</td></tr>
+                `).join('');
             }
         }
 
         async function placeOrder() {
             const status = document.getElementById('order-status');
-            const type = document.getElementById('order-type').value;
-            const qty = document.getElementById('order-qty').value;
-            const price = document.getElementById('order-price').value;
-
-            status.innerText = "Processing...";
             try {
                 const res = await fetchWithAuth(`${API}/order`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         id: "ord_" + Math.random().toString(36).substr(2, 9),
-                        orderType: type,
-                        price: price,
-                        quantity: qty
+                        orderType: document.getElementById('order-type').value,
+                        price: document.getElementById('order-price').value,
+                        quantity: document.getElementById('order-qty').value
                     })
                 });
-                const data = await res.json();
-                status.innerText = res.ok ? "✅ Placed" : `❌ ${data.error || 'Failed'}`;
-                if(res.ok) setTimeout(refreshData, 500);
-            } catch (e) { status.innerText = "Network Error"; }
+                status.innerText = res.ok ? "✅ Placed" : "❌ Error";
+                if(res.ok) setTimeout(refreshUserData, 500);
+            } catch(e) { status.innerText = "Error"; }
         }
 
-        async function executeRecharge() {
-            const status = document.getElementById('recharge-status');
-            const target = document.getElementById('recharge-target').value;
-            const amount = document.getElementById('recharge-amount').value;
-            status.innerText = "Minting...";
-            try {
-                const res = await fetchWithAuth(`${API}/recharge`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: target, amount: amount })
-                });
-                status.innerText = res.ok ? "✅ Done" : "❌ Error (Admin Only)";
-                if(res.ok) setTimeout(refreshData, 500);
-            } catch (e) { status.innerText = "Network Error"; }
-        }
-
-        async function fetchHistory() {
-            if(!USERNAME) return;
-            const res = await fetchWithAuth(`${API}/history/${USERNAME}`);
+        // --- ADMIN FUNCTIONS ---
+        async function fetchGlobalUsers() {
+            const res = await fetchWithAuth(`${API}/admin/users`);
             if(res.ok) {
-                let data = await res.json();
-                data.sort((a, b) => new Date(b.Timestamp) - new Date(a.Timestamp));
-                document.getElementById('history-list').innerHTML = data.map(h => `
-                    <tr class="border-b border-slate-800/50 hover:bg-slate-800/80 transition-colors">
-                        <td class="p-4 whitespace-nowrap">
-                            <span class="text-xs text-slate-400 font-medium block">${h.Timestamp.replace('T', ' ').substring(0, 19)}</span>
-                            <span class="text-[10px] text-blue-400 font-mono mt-1 block">${h.Record.LastAction || 'Legacy Record'}</span>
-                        </td>
-                        <td class="p-4 font-mono text-xs text-slate-500" title="${h.TxId}">${h.TxId.substring(0, 12)}...</td>
-                        <td class="p-4"><span class="text-white font-bold text-sm">${h.Record.EnergyBalance}</span></td>
-                        <td class="p-4"><span class="text-white font-bold text-sm">${h.Record.TokenBalance}</span></td>
+                const users = await res.json();
+                document.getElementById('total-nodes').innerText = users.length;
+                document.getElementById('global-user-list').innerHTML = users.map(u => `
+                    <tr class="border-b border-slate-800/50 hover:bg-slate-800/30">
+                        <td class="p-3 font-mono text-white">${u.ID}</td>
+                        <td class="p-3 text-slate-500">${u.Owner}</td>
+                        <td class="p-3 text-emerald-400 font-bold">${u.EnergyBalance}</td>
+                        <td class="p-3 text-emerald-400 font-bold">${u.TokenBalance}</td>
+                        <td class="p-3 text-amber-500 text-xs">${u.LockedEnergy}e / ${u.LockedTokens}t</td>
+                        <td class="p-3 text-xs text-blue-400">${u.LastAction}</td>
                     </tr>
                 `).join('');
             }
         }
 
-        function startPolling() {
-            refreshData();
-            fetchHistory();
-            setInterval(refreshData, 3000);
+        async function executeMint() {
+            const status = document.getElementById('mint-status');
+            try {
+                const res = await fetchWithAuth(`${API}/admin/mint`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id: document.getElementById('mint-target').value,
+                        amount: document.getElementById('mint-amount').value
+                    })
+                });
+                status.innerText = res.ok ? "✅ Minted" : "❌ ABAC Denied";
+                if(res.ok) setTimeout(fetchGlobalUsers, 500);
+            } catch(e) { status.innerText = "Network Error"; }
         }
+
+        async function registerUser() {
+            const status = document.getElementById('reg-status');
+            try {
+                const res = await fetchWithAuth(`${API}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: document.getElementById('reg-user').value,
+                        password: document.getElementById('reg-pass').value,
+                        role: document.getElementById('reg-role').value
+                    })
+                });
+                status.innerText = res.ok ? "✅ Registered" : "❌ Error";
+                if(res.ok) setTimeout(fetchGlobalUsers, 500);
+            } catch(e) { status.innerText = "Error"; }
+        }
+
+        function startUserPolling() { refreshUserData(); setInterval(refreshUserData, 3000); }
+        function startAdminPolling() { fetchGlobalUsers(); setInterval(fetchGlobalUsers, 5000); }
     </script>
 </body>
 </html>

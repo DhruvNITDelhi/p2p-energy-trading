@@ -1,0 +1,1 @@
+{"credentials":{"certificate":"-----BEGIN CERTIFICATE-----\n(Mock Cert for admin with role=admin)\n-----END CERTIFICATE-----","privateKey":"-----BEGIN PRIVATE KEY-----\n(Mock Key for admin)\n-----END PRIVATE KEY-----"},"mspId":"Org1MSP","type":"X.509"}

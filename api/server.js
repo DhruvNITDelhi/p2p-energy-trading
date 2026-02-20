@@ -6,7 +6,7 @@ const path = require('path');
 const config = require('./config');
 const wallet = require('./services/wallet');
 const auth = require('./services/auth');
-const blockchain = require('./services/blockchain'); // Use extracted module
+const blockchain = require('./services/blockchain');
 const matcher = require('./services/matcher');
 
 const app = express();
@@ -15,17 +15,6 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // --- Auth Routes ---
-app.post('/api/auth/register', async (req, res) => {
-    try {
-        const { username, password } = req.body;
-        if (!username || !password) return res.status(400).json({ error: "Missing username or password" });
-        await auth.register(username, password);
-        res.json({ message: `User ${username} registered successfully` });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { username, password } = req.body;
@@ -38,7 +27,20 @@ app.post('/api/auth/login', async (req, res) => {
 
 // --- Protected Routes ---
 
-// 1. GET BALANCE (Personalized)
+// 1. REGISTER NEW USER (Admin Only)
+app.post('/api/auth/register', auth.verifyToken, auth.isAdmin, async (req, res) => {
+    try {
+        const { username, password, role } = req.body;
+        if (!username || !password) return res.status(400).json({ error: "Missing username or password" });
+
+        await auth.register(username, password, role || 'user');
+        res.json({ message: `User ${username} registered successfully` });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// 2. GET BALANCE (Personalized)
 app.get('/api/node/me', auth.verifyToken, async (req, res) => {
     try {
         const username = req.user.username;
@@ -50,19 +52,17 @@ app.get('/api/node/me', auth.verifyToken, async (req, res) => {
     } catch (e) { res.status(500).send({error: e.message}); }
 });
 
-// 2. PLACE ORDER
+// 3. PLACE ORDER
 app.post('/api/order', auth.verifyToken, async (req, res) => {
     try {
         const username = req.user.username;
         const { id, orderType, price, quantity } = req.body;
 
-        // 1. Lock funds on chain (creates 'Order' asset / intent)
         const { contract, gateway, client } = await blockchain.getContract(username);
         try {
             await contract.submitTransaction('PlaceOrder', id, username, orderType, price.toString(), quantity.toString());
         } finally { gateway.close(); client.close(); }
 
-        // 2. Add to Off-Chain Matcher
         await matcher.addOrder({
             id,
             owner: username,
@@ -76,27 +76,42 @@ app.post('/api/order', auth.verifyToken, async (req, res) => {
     } catch (e) { res.status(500).send({error: e.message}); }
 });
 
-// 3. RECHARGE (Admin Only)
-app.post('/api/recharge', auth.verifyToken, async (req, res) => {
-    if (req.user.username !== config.ADMIN_USER) return res.status(403).json({ error: "Admin only" });
+// 4. ORACLE MINT ASSETS (Admin Only - Replaces Recharge)
+app.post('/api/admin/mint', auth.verifyToken, auth.isAdmin, async (req, res) => {
     try {
         const { contract, gateway, client } = await blockchain.getContract(req.user.username);
         try {
             const { id, amount } = req.body;
-            await contract.submitTransaction('RechargeNode', id, amount.toString());
-            res.json({ message: "Recharge Success!" });
+            await contract.submitTransaction('OracleMintAssets', id, amount.toString());
+            res.json({ message: "Assets Minted via Oracle Contract!" });
         } finally { gateway.close(); client.close(); }
     } catch (e) { res.status(500).send({error: e.message}); }
 });
 
-// 4. ORDER BOOK (Off-Chain Source)
+// 5. GET ALL USERS (Admin Only)
+app.get('/api/admin/users', auth.verifyToken, auth.isAdmin, async (req, res) => {
+    try {
+        const { contract, gateway, client } = await blockchain.getContract(req.user.username);
+        try {
+            const resultBytes = await contract.evaluateTransaction('GetAllNodes');
+            res.json(JSON.parse(new TextDecoder().decode(resultBytes)));
+        } finally { gateway.close(); client.close(); }
+    } catch (e) { res.status(500).send({error: e.message}); }
+});
+
+
+// 6. ORDER BOOK (Off-Chain Source)
 app.get('/api/orderbook', async (req, res) => {
-    // Return the matcher's current book
     res.json(matcher.getOrderBook());
 });
 
-// 5. HISTORY
+// 7. HISTORY
 app.get('/api/history/:id', auth.verifyToken, async (req, res) => {
+    // Users can see their own. Admin can see anyone?
+    if (req.user.role !== 'admin' && req.user.username !== req.params.id) {
+        return res.status(403).json({ error: "Access Denied" });
+    }
+
     try {
         const { contract, gateway, client } = await blockchain.getContract(req.user.username);
         try {

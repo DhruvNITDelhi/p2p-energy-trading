@@ -1,0 +1,1 @@
+{"credentials":{"certificate":"-----BEGIN CERTIFICATE-----\n(Mock Cert for newNode with role=user)\n-----END CERTIFICATE-----","privateKey":"-----BEGIN PRIVATE KEY-----\n(Mock Key for newNode)\n-----END PRIVATE KEY-----"},"mspId":"Org1MSP","type":"X.509"}

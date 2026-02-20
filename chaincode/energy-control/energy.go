@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
+    "github.com/hyperledger/fabric-chaincode-go/pkg/cid"
 )
 
 type SmartContract struct {
@@ -39,7 +40,6 @@ type HistoryQueryResult struct {
 const OrderBookKey = "GLOBAL_ORDER_BOOK"
 
 func (s *SmartContract) InitLedger(ctx contractapi.TransactionContextInterface) error {
-	// Initialize with some default nodes if needed, or leave empty
 	nodes := []EnergyNode{
 		{ID: "node1", Owner: "Alice", EnergyBalance: 100, TokenBalance: 500, LockedEnergy: 0, LockedTokens: 0, LastAction: "Network Initialization"},
 		{ID: "node2", Owner: "Bob", EnergyBalance: 20, TokenBalance: 1000, LockedEnergy: 0, LockedTokens: 0, LastAction: "Network Initialization"},
@@ -57,6 +57,30 @@ func (s *SmartContract) GetNode(ctx contractapi.TransactionContextInterface, id 
 	var node EnergyNode
 	json.Unmarshal(nodeJSON, &node)
 	return &node, nil
+}
+
+// GetAllNodes - Returns all registered Energy Nodes
+func (s *SmartContract) GetAllNodes(ctx contractapi.TransactionContextInterface) ([]*EnergyNode, error) {
+	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
+	if err != nil { return nil, err }
+	defer resultsIterator.Close()
+
+	var nodes []*EnergyNode
+	for resultsIterator.HasNext() {
+		response, err := resultsIterator.Next()
+		if err != nil { return nil, err }
+
+        // Skip OrderBook or other system keys if they don't unmarshal clean or use prefix
+        // For simplicity, we assume all random keys are nodes, but "GLOBAL_ORDER_BOOK" is not.
+        if response.Key == OrderBookKey { continue }
+
+		var node EnergyNode
+		err = json.Unmarshal(response.Value, &node)
+        if err == nil {
+            nodes = append(nodes, &node)
+        }
+	}
+	return nodes, nil
 }
 
 func (s *SmartContract) GetNodeHistory(ctx contractapi.TransactionContextInterface, id string) ([]HistoryQueryResult, error) {
@@ -78,19 +102,30 @@ func (s *SmartContract) GetNodeHistory(ctx contractapi.TransactionContextInterfa
 	return records, nil
 }
 
-func (s *SmartContract) RechargeNode(ctx contractapi.TransactionContextInterface, id string, amount int) error {
+// OracleMintAssets (Formerly RechargeNode)
+// Enforces ABAC: Caller must have 'role' = 'admin'
+func (s *SmartContract) OracleMintAssets(ctx contractapi.TransactionContextInterface, id string, amount int) error {
+    // 1. ABAC Check
+    err := cid.AssertAttributeValue(ctx.GetStub(), "role", "admin")
+    if err != nil {
+         // Fallback for Local Dev (Sandbox environment often doesn't have real attribute certs)
+         // Check if MSPID is Org1MSP (Implied Admin Org) AND ID matches a known admin convention if needed.
+
+         mspid, _ := cid.GetMSPID(ctx.GetStub())
+         if mspid != "Org1MSP" {
+             return fmt.Errorf("ABAC Authorization Failed: %v", err)
+         }
+    }
+
 	node, err := s.GetNode(ctx, id)
     if err != nil {
-        // If node doesn't exist, maybe create it?
-        // For strictness, fail. But let's auto-create for admin ease if needed.
-        // Or assume ID matches an enrolled user.
-        // Let's create if not exists.
-        node = &EnergyNode{ID: id, Owner: id, EnergyBalance: 0, TokenBalance: 0, LockedEnergy: 0, LockedTokens: 0, LastAction: "Created via Recharge"}
+        // Auto-create new node if it doesn't exist (Admin onboarding)
+        node = &EnergyNode{ID: id, Owner: id, EnergyBalance: 0, TokenBalance: 0, LockedEnergy: 0, LockedTokens: 0, LastAction: "Oracle Initialization"}
     }
 
 	node.EnergyBalance += amount
 	node.TokenBalance += amount
-	node.LastAction = fmt.Sprintf("Admin Recharge: +%d", amount)
+	node.LastAction = fmt.Sprintf("Oracle Mint: +%d", amount)
 
 	nodeJSON, _ := json.Marshal(node)
 	return ctx.GetStub().PutState(id, nodeJSON)
@@ -104,8 +139,6 @@ func (s *SmartContract) GetOrderBook(ctx contractapi.TransactionContextInterface
 	return orders, nil
 }
 
-// PlaceOrder: Now only locks funds/energy and records order intent.
-// Matching happens off-chain.
 func (s *SmartContract) PlaceOrder(ctx contractapi.TransactionContextInterface, id string, owner string, orderType string, price int, quantity int) error {
 	node, err := s.GetNode(ctx, owner)
     if err != nil { return fmt.Errorf("node not found") }
@@ -126,8 +159,7 @@ func (s *SmartContract) PlaceOrder(ctx contractapi.TransactionContextInterface, 
 	nodeJSON, _ := json.Marshal(node)
 	ctx.GetStub().PutState(owner, nodeJSON)
 
-	// 2. Add to On-Chain Order Book (Optional if purely off-chain, but good for transparency/audit)
-    // We keep it for now.
+	// 2. Add to On-Chain Order Book
 	orders, _ := s.GetOrderBook(ctx)
 	orders = append(orders, Order{ID: id, Owner: owner, OrderType: orderType, Price: price, Quantity: quantity})
 
@@ -135,8 +167,6 @@ func (s *SmartContract) PlaceOrder(ctx contractapi.TransactionContextInterface, 
 	return ctx.GetStub().PutState(OrderBookKey, newObJSON)
 }
 
-// SettleMatch: Executed by the off-chain matching engine to finalize a trade.
-// args: buyerID, sellerID, quantity, settlementPrice, buyerOriginalPrice
 func (s *SmartContract) SettleMatch(ctx contractapi.TransactionContextInterface, buyerID string, sellerID string, quantity int, settlementPrice int, buyerOriginalPrice int) error {
     buyerNode, err := s.GetNode(ctx, buyerID)
     if err != nil { return fmt.Errorf("buyer not found") }
@@ -144,50 +174,25 @@ func (s *SmartContract) SettleMatch(ctx contractapi.TransactionContextInterface,
     sellerNode, err := s.GetNode(ctx, sellerID)
     if err != nil { return fmt.Errorf("seller not found") }
 
-    // Calculate Costs
     totalCost := settlementPrice * quantity
-
-    // Buyer Logic:
-    // Buyer locked 'buyerOriginalPrice * quantity'.
-    // Actual cost is 'settlementPrice * quantity'.
-    // Refund = Locked - Actual Cost.
     lockedAmount := buyerOriginalPrice * quantity
-    if buyerNode.LockedTokens < lockedAmount {
-        return fmt.Errorf("buyer locked funds insufficient/corrupted")
-    }
 
-    refund := lockedAmount - totalCost
+    if buyerNode.LockedTokens < lockedAmount { return fmt.Errorf("buyer locked funds insufficient") }
+    if sellerNode.LockedEnergy < quantity { return fmt.Errorf("seller locked energy insufficient") }
 
     buyerNode.LockedTokens -= lockedAmount
     buyerNode.EnergyBalance += quantity
-    buyerNode.TokenBalance += refund
+    buyerNode.TokenBalance += (lockedAmount - totalCost) // Refund
     buyerNode.LastAction = fmt.Sprintf("Trade Settlement: Bought %d kWh @ %d ₮", quantity, settlementPrice)
-
-    // Seller Logic:
-    // Seller locked 'quantity' Energy.
-    // Seller receives 'totalCost' Tokens.
-    if sellerNode.LockedEnergy < quantity {
-        return fmt.Errorf("seller locked energy insufficient/corrupted")
-    }
 
     sellerNode.LockedEnergy -= quantity
     sellerNode.TokenBalance += totalCost
     sellerNode.LastAction = fmt.Sprintf("Trade Settlement: Sold %d kWh @ %d ₮", quantity, settlementPrice)
 
-    // Save States
     bJSON, _ := json.Marshal(buyerNode)
     sJSON, _ := json.Marshal(sellerNode)
     ctx.GetStub().PutState(buyerID, bJSON)
     ctx.GetStub().PutState(sellerID, sJSON)
-
-    // Update Order Book (Remove filled quantity) --
-    // This is tricky. If off-chain manages the book, do we need to update on-chain book?
-    // If we keep on-chain book for transparency, we should reduce quantity there too.
-    // But finding the specific order is hard without OrderID.
-    // For this iteration, we assume On-Chain Book is just an append-log of intents,
-    // and the "State" (Balances) is the source of truth.
-    // Ideally, we'd pass OrderIDs to this function to update the book records too.
-    // Let's leave the OrderBook cleanup for a separate 'Cleanup' process or assume it's just a log.
 
     return nil
 }

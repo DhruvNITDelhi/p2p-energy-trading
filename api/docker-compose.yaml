@@ -1,0 +1,30 @@
+version: '3'
+services:
+  api:
+    build: .
+    container_name: energy-api
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - CRYPTO_PATH=/fabric-samples/test-network/organizations/peerOrganizations/org1.example.com
+      - MSP_ID=Org1MSP
+      - CHANNEL_NAME=mychannel
+      - CHAINCODE_NAME=energy
+      - CA_URL=https://ca.org1.example.com:7054
+      - PEER_ENDPOINT=peer0.org1.example.com:7051
+      - PEER_HOST_OVERRIDE=peer0.org1.example.com
+      - ADMIN_USER=admin
+      - ADMIN_PASSWORD=adminpw
+    volumes:
+      # Mount fabric-samples from Host. Adjust path as needed.
+      # Assuming fabric-samples is a sibling of the repository root.
+      - ../../fabric-samples:/fabric-samples
+      - ./wallet:/app/wallet
+      - ./users.json:/app/users.json
+    networks:
+      - fabric_test
+
+networks:
+  fabric_test:
+    external: true

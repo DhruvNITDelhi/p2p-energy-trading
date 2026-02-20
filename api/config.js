@@ -10,6 +10,10 @@ module.exports = {
     CHAINCODE_NAME: process.env.CHAINCODE_NAME || 'energy',
     MSP_ID: process.env.MSP_ID || 'Org1MSP',
 
+    // Peer Config (Crucial for Docker)
+    PEER_ENDPOINT: process.env.PEER_ENDPOINT || 'localhost:7051',
+    PEER_HOST_OVERRIDE: process.env.PEER_HOST_OVERRIDE || 'peer0.org1.example.com',
+
     // Paths (Using environment variables or defaults relative to this file)
     CRYPTO_PATH: process.env.CRYPTO_PATH || path.resolve(__dirname, '..', 'fabric-samples', 'test-network', 'organizations', 'peerOrganizations', 'org1.example.com'),
     WALLET_PATH: process.env.WALLET_PATH || path.resolve(__dirname, 'wallet'),

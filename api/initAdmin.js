@@ -7,7 +7,7 @@ const path = require('path');
 async function initAdmin() {
     console.log("--- Bootstrapping Admin ---");
     try {
-        // 1. Register 'admin' in local users.json (if not exists)
+        // 1. Register 'admin' in local users.json
         try {
             await auth.register(config.ADMIN_USER, config.ADMIN_PASSWORD, 'admin');
             console.log(`✅ Admin user '${config.ADMIN_USER}' registered in Web Auth.`);
@@ -21,7 +21,6 @@ async function initAdmin() {
         const keystorePath = path.join(adminMspPath, 'keystore');
         let cert, key;
 
-        // Try to read real crypto
         try {
             if (fs.existsSync(signCertsPath) && fs.existsSync(keystorePath)) {
                 const certFiles = fs.readdirSync(signCertsPath);
@@ -38,13 +37,6 @@ async function initAdmin() {
              console.log("⚠️  REAL CRYPTO NOT FOUND. USING MOCK (FOR DEMO).");
              cert = `-----BEGIN CERTIFICATE-----\nMOCK_ADMIN_CERT\n-----END CERTIFICATE-----`;
              key = `-----BEGIN PRIVATE KEY-----\nMOCK_ADMIN_KEY\n-----END PRIVATE KEY-----`;
-             // For the chaincode fallback to work with Mock, we need to ensure chaincode logic can handle it?
-             // No, chaincode fallback checks cert.Subject.CommonName == "admin".
-             // A mock cert string won't parse in chaincode unless it's valid ASN.1.
-             // But if we are in "sandbox", maybe the user is OK with "mock" causing a failure unless the chaincode check is extremely lenient.
-             // The user said: "The local test-network CA is failing...". This implies they WANT real certs but CAN'T get attributes.
-             // If I can't read the files, I can't fix it.
-             // Wait, I might not have permission to `../fabric-samples`.
         }
 
         const identity = {
@@ -61,7 +53,8 @@ async function initAdmin() {
 
     } catch (e) {
         console.error("Bootstrap Failed:", e);
+        throw e;
     }
 }
 
-initAdmin();
+module.exports = initAdmin;

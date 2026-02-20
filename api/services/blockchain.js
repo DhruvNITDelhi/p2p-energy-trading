@@ -21,10 +21,18 @@ async function getContract(username) {
         }
     }
 
-    const tlsCertPath = path.join(config.CRYPTO_PATH, 'peers', 'peer0.org1.example.com', 'tls', 'ca.crt');
+    // Handle Certificate Path (May be absolute if Docker)
+    let tlsCertPath;
+    if (path.isAbsolute(config.CRYPTO_PATH)) {
+        tlsCertPath = path.join(config.CRYPTO_PATH, 'peers', 'peer0.org1.example.com', 'tls', 'ca.crt');
+    } else {
+        tlsCertPath = path.resolve(config.CRYPTO_PATH, 'peers', 'peer0.org1.example.com', 'tls', 'ca.crt');
+    }
+
     const tlsRootCert = fs.readFileSync(tlsCertPath);
 
-    const client = new grpc.Client('localhost:7051', grpc.credentials.createSsl(tlsRootCert), { 'grpc.ssl_target_name_override': 'peer0.org1.example.com' });
+    // Connect to Peer
+    const client = new grpc.Client(config.PEER_ENDPOINT, grpc.credentials.createSsl(tlsRootCert), { 'grpc.ssl_target_name_override': config.PEER_HOST_OVERRIDE });
 
     const gateway = connect({
         client,

@@ -20,6 +20,7 @@
     "express": "^5.2.1",
     "fabric-ca-client": "^2.2.20",
     "fabric-common": "^2.2.20",
-    "jsonwebtoken": "^9.0.3"
+    "jsonwebtoken": "^9.0.3",
+    "jsrsasign": "^11.1.1"
   }
 }

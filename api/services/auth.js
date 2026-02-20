@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const wallet = require('./wallet');
+const userService = require('./userService');
 
 const USERS_FILE = path.join(__dirname, '..', 'users.json');
 
@@ -29,21 +30,14 @@ const register = async (username, password, role = 'user') => {
     const users = getUsers();
     if (users[username]) throw new Error('User already exists');
 
-    // 1. Create Blockchain Identity (Mocking the CA interaction)
-    // We add the 'role' attribute to the wallet metadata if we were doing real checks on Node side,
-    // but Node side checks JWT. Chaincode checks cert.
-    // Simulating cert attribute injection:
-    const mockCert = `-----BEGIN CERTIFICATE-----\n(Mock Cert for ${username} with role=${role})\n-----END CERTIFICATE-----`;
+    // 1. Create Blockchain Identity (Using Real CA Client Service)
+    // This calls the fabric-ca-client to register and enroll the user.
+    // If CA is down, this will throw an error, which is better than crashing later on mock strings.
+    const result = await userService.registerUser(username, username); // Using username as secret for simplicity
 
-    const mockIdentity = {
-        credentials: {
-            certificate: mockCert,
-            privateKey: `-----BEGIN PRIVATE KEY-----\n(Mock Key for ${username})\n-----END PRIVATE KEY-----`
-        },
-        mspId: config.MSP_ID,
-        type: 'X.509'
-    };
-    await wallet.put(username, mockIdentity);
+    if (result.error) {
+        throw new Error(`CA Registration Failed: ${result.error}`);
+    }
 
     // 2. Save Web Credentials
     const hash = await bcrypt.hash(password, 10);

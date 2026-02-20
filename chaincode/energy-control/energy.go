@@ -70,8 +70,7 @@ func (s *SmartContract) GetAllNodes(ctx contractapi.TransactionContextInterface)
 		response, err := resultsIterator.Next()
 		if err != nil { return nil, err }
 
-        // Skip OrderBook or other system keys if they don't unmarshal clean or use prefix
-        // For simplicity, we assume all random keys are nodes, but "GLOBAL_ORDER_BOOK" is not.
+        // Skip OrderBook or other system keys
         if response.Key == OrderBookKey { continue }
 
 		var node EnergyNode
@@ -104,22 +103,36 @@ func (s *SmartContract) GetNodeHistory(ctx contractapi.TransactionContextInterfa
 
 // OracleMintAssets (Formerly RechargeNode)
 // Enforces ABAC: Caller must have 'role' = 'admin'
+// Fallback: Checks Cert CommonName='admin' and MSP='Org1MSP' if attributes missing
 func (s *SmartContract) OracleMintAssets(ctx contractapi.TransactionContextInterface, id string, amount int) error {
-    // 1. ABAC Check
-    err := cid.AssertAttributeValue(ctx.GetStub(), "role", "admin")
-    if err != nil {
-         // Fallback for Local Dev (Sandbox environment often doesn't have real attribute certs)
-         // Check if MSPID is Org1MSP (Implied Admin Org) AND ID matches a known admin convention if needed.
-
-         mspid, _ := cid.GetMSPID(ctx.GetStub())
-         if mspid != "Org1MSP" {
-             return fmt.Errorf("ABAC Authorization Failed: %v", err)
-         }
+    // 1. Primary ABAC Check (Enterprise Standard)
+    errAttribute := cid.AssertAttributeValue(ctx.GetStub(), "role", "admin")
+    if errAttribute == nil {
+        // Authorized via Attribute
+        return s.processMint(ctx, id, amount)
     }
 
-	node, err := s.GetNode(ctx, id)
+    // 2. Sandbox Fallback (If attributes missing)
+    // Check MSPID and CommonName
+    mspid, errMsp := cid.GetMSPID(ctx.GetStub())
+    if errMsp != nil { return fmt.Errorf("failed to get MSPID: %v", errMsp) }
+
+    cert, errCert := cid.GetX509Certificate(ctx.GetStub())
+    if errCert != nil { return fmt.Errorf("failed to get certificate: %v", errCert) }
+
+    if mspid == "Org1MSP" && cert.Subject.CommonName == "admin" {
+        // Authorized via Fallback
+        return s.processMint(ctx, id, amount)
+    }
+
+    // If both failed
+    return fmt.Errorf("ABAC Denied: %v. Fallback Denied: MSP=%s, CN=%s", errAttribute, mspid, cert.Subject.CommonName)
+}
+
+func (s *SmartContract) processMint(ctx contractapi.TransactionContextInterface, id string, amount int) error {
+    node, err := s.GetNode(ctx, id)
     if err != nil {
-        // Auto-create new node if it doesn't exist (Admin onboarding)
+        // Auto-create new node if it doesn't exist
         node = &EnergyNode{ID: id, Owner: id, EnergyBalance: 0, TokenBalance: 0, LockedEnergy: 0, LockedTokens: 0, LastAction: "Oracle Initialization"}
     }
 

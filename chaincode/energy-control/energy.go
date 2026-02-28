@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
+    "github.com/hyperledger/fabric-chaincode-go/pkg/cid"
 )
 
 type SmartContract struct {
@@ -17,9 +18,9 @@ type EnergyNode struct {
 	Owner         string `json:"Owner"`
 	EnergyBalance int    `json:"EnergyBalance"`
 	TokenBalance  int    `json:"TokenBalance"`
-	LockedEnergy  int    `json:"LockedEnergy"`  // NEW: Escrow tracking
-	LockedTokens  int    `json:"LockedTokens"`  // NEW: Escrow tracking
-	LastAction    string `json:"LastAction"`    // NEW: Audit context
+	LockedEnergy  int    `json:"LockedEnergy"`
+	LockedTokens  int    `json:"LockedTokens"`
+	LastAction    string `json:"LastAction"`
 }
 
 type Order struct {
@@ -28,6 +29,14 @@ type Order struct {
 	OrderType string `json:"OrderType"`
 	Price     int    `json:"Price"`
 	Quantity  int    `json:"Quantity"`
+}
+
+type P2PTrade struct {
+    ID       string `json:"ID"`
+    Seller   string `json:"Seller"`
+    Quantity int    `json:"Quantity"`
+    Price    int    `json:"Price"`
+    Status   string `json:"Status"` // OPEN, COMPLETED
 }
 
 type HistoryQueryResult struct {
@@ -58,6 +67,26 @@ func (s *SmartContract) GetNode(ctx contractapi.TransactionContextInterface, id 
 	return &node, nil
 }
 
+func (s *SmartContract) GetAllNodes(ctx contractapi.TransactionContextInterface) ([]*EnergyNode, error) {
+	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
+	if err != nil { return nil, err }
+	defer resultsIterator.Close()
+
+	var nodes []*EnergyNode
+	for resultsIterator.HasNext() {
+		response, err := resultsIterator.Next()
+		if err != nil { return nil, err }
+        if response.Key == OrderBookKey || len(response.Key) > 6 && response.Key[0:6] == "TRADE_" { continue }
+
+		var node EnergyNode
+		err = json.Unmarshal(response.Value, &node)
+        if err == nil {
+            nodes = append(nodes, &node)
+        }
+	}
+	return nodes, nil
+}
+
 func (s *SmartContract) GetNodeHistory(ctx contractapi.TransactionContextInterface, id string) ([]HistoryQueryResult, error) {
 	resultsIterator, _ := ctx.GetStub().GetHistoryForKey(id)
 	defer resultsIterator.Close()
@@ -67,7 +96,7 @@ func (s *SmartContract) GetNodeHistory(ctx contractapi.TransactionContextInterfa
 		response, _ := resultsIterator.Next()
 		var node EnergyNode
 		if len(response.Value) > 0 { json.Unmarshal(response.Value, &node) }
-		
+
 		records = append(records, HistoryQueryResult{
 			TxId:      response.TxId,
 			Timestamp: time.Unix(response.Timestamp.Seconds, int64(response.Timestamp.Nanos)).Format(time.RFC3339),
@@ -77,14 +106,34 @@ func (s *SmartContract) GetNodeHistory(ctx contractapi.TransactionContextInterfa
 	return records, nil
 }
 
-func (s *SmartContract) RechargeNode(ctx contractapi.TransactionContextInterface, id string, amount int) error {
-	node, _ := s.GetNode(ctx, id)
+// OracleMintAssets / MintTokens
+func (s *SmartContract) OracleMintAssets(ctx contractapi.TransactionContextInterface, id string, amount int) error {
+    errAttribute := cid.AssertAttributeValue(ctx.GetStub(), "role", "admin")
+    if errAttribute != nil {
+        mspid, errMsp := cid.GetMSPID(ctx.GetStub())
+        if errMsp != nil { return fmt.Errorf("failed to get MSPID: %v", errMsp) }
+        cert, errCert := cid.GetX509Certificate(ctx.GetStub())
+        if errCert != nil { return fmt.Errorf("failed to get certificate: %v", errCert) }
+        if mspid != "Org1MSP" || cert.Subject.CommonName != "admin" {
+            return fmt.Errorf("ABAC Denied: %v. Fallback Denied: MSP=%s, CN=%s", errAttribute, mspid, cert.Subject.CommonName)
+        }
+    }
+
+	node, err := s.GetNode(ctx, id)
+    if err != nil {
+        node = &EnergyNode{ID: id, Owner: id, EnergyBalance: 0, TokenBalance: 0, LockedEnergy: 0, LockedTokens: 0, LastAction: "Oracle Initialization"}
+    }
+
 	node.EnergyBalance += amount
-	node.TokenBalance += amount
-	node.LastAction = fmt.Sprintf("Admin Recharge: +%d", amount) // Context!
-	
+	node.TokenBalance += amount // For simplicity, minting usually adds tokens or energy. "Recharge" implies tokens? Or both? Original code did both.
+	node.LastAction = fmt.Sprintf("Oracle Mint: +%d", amount)
+
 	nodeJSON, _ := json.Marshal(node)
 	return ctx.GetStub().PutState(id, nodeJSON)
+}
+
+func (s *SmartContract) MintTokens(ctx contractapi.TransactionContextInterface, id string, amount int) error {
+    return s.OracleMintAssets(ctx, id, amount)
 }
 
 func (s *SmartContract) GetOrderBook(ctx contractapi.TransactionContextInterface) ([]Order, error) {
@@ -96,9 +145,9 @@ func (s *SmartContract) GetOrderBook(ctx contractapi.TransactionContextInterface
 }
 
 func (s *SmartContract) PlaceOrder(ctx contractapi.TransactionContextInterface, id string, owner string, orderType string, price int, quantity int) error {
-	node, _ := s.GetNode(ctx, owner)
+	node, err := s.GetNode(ctx, owner)
+    if err != nil { return fmt.Errorf("node not found") }
 
-	// 1. ESCROW: Move to Locked instead of just subtracting!
 	if orderType == "SELL" {
 		if node.EnergyBalance < quantity { return fmt.Errorf("insufficient energy to sell") }
 		node.EnergyBalance -= quantity
@@ -114,65 +163,107 @@ func (s *SmartContract) PlaceOrder(ctx contractapi.TransactionContextInterface, 
 	nodeJSON, _ := json.Marshal(node)
 	ctx.GetStub().PutState(owner, nodeJSON)
 
-	// 2. Add to Order Book
 	orders, _ := s.GetOrderBook(ctx)
 	orders = append(orders, Order{ID: id, Owner: owner, OrderType: orderType, Price: price, Quantity: quantity})
-
-	// 3. Run Matching Engine
-	orders = s.matchOrders(ctx, orders)
 
 	newObJSON, _ := json.Marshal(orders)
 	return ctx.GetStub().PutState(OrderBookKey, newObJSON)
 }
 
-func (s *SmartContract) matchOrders(ctx contractapi.TransactionContextInterface, orders []Order) []Order {
-	for i := 0; i < len(orders); i++ {
-		for j := i + 1; j < len(orders); j++ {
-			buyOrder := &orders[i]
-			sellOrder := &orders[j]
+func (s *SmartContract) SettleMatch(ctx contractapi.TransactionContextInterface, buyerID string, sellerID string, quantity int, settlementPrice int, buyerOriginalPrice int) error {
+    buyerNode, err := s.GetNode(ctx, buyerID)
+    if err != nil { return fmt.Errorf("buyer not found") }
 
-			if buyOrder.OrderType == sellOrder.OrderType { continue }
-			if buyOrder.OrderType == "SELL" { buyOrder, sellOrder = sellOrder, buyOrder }
+    sellerNode, err := s.GetNode(ctx, sellerID)
+    if err != nil { return fmt.Errorf("seller not found") }
 
-			if buyOrder.Price >= sellOrder.Price && buyOrder.Quantity > 0 && sellOrder.Quantity > 0 {
-				tradeQty := buyOrder.Quantity
-				if sellOrder.Quantity < tradeQty { tradeQty = sellOrder.Quantity }
-				settlementPrice := sellOrder.Price 
+    totalCost := settlementPrice * quantity
+    lockedAmount := buyerOriginalPrice * quantity
 
-				buyOrder.Quantity -= tradeQty
-				sellOrder.Quantity -= tradeQty
+    if buyerNode.LockedTokens < lockedAmount { return fmt.Errorf("buyer locked funds insufficient") }
+    if sellerNode.LockedEnergy < quantity { return fmt.Errorf("seller locked energy insufficient") }
 
-				buyerNode, _ := s.GetNode(ctx, buyOrder.Owner)
-				sellerNode, _ := s.GetNode(ctx, sellOrder.Owner)
+    buyerNode.LockedTokens -= lockedAmount
+    buyerNode.EnergyBalance += quantity
+    buyerNode.TokenBalance += (lockedAmount - totalCost)
+    buyerNode.LastAction = fmt.Sprintf("Trade Settlement: Bought %d kWh @ %d ₮", quantity, settlementPrice)
 
-				// Settle Escrows!
-				buyerCost := settlementPrice * tradeQty
-				buyerRefund := (buyOrder.Price * tradeQty) - buyerCost
+    sellerNode.LockedEnergy -= quantity
+    sellerNode.TokenBalance += totalCost
+    sellerNode.LastAction = fmt.Sprintf("Trade Settlement: Sold %d kWh @ %d ₮", quantity, settlementPrice)
 
-				// Buyer gets energy, releases locked tokens, gets refund if matched cheaper
-				buyerNode.LockedTokens -= (buyOrder.Price * tradeQty)
-				buyerNode.EnergyBalance += tradeQty
-				buyerNode.TokenBalance += buyerRefund 
-				buyerNode.LastAction = fmt.Sprintf("Trade Execution: Bought %d kWh", tradeQty)
+    bJSON, _ := json.Marshal(buyerNode)
+    sJSON, _ := json.Marshal(sellerNode)
+    ctx.GetStub().PutState(buyerID, bJSON)
+    ctx.GetStub().PutState(sellerID, sJSON)
 
-				// Seller gets tokens, releases locked energy
-				sellerNode.LockedEnergy -= tradeQty
-				sellerNode.TokenBalance += buyerCost
-				sellerNode.LastAction = fmt.Sprintf("Trade Execution: Sold %d kWh", tradeQty)
+    return nil
+}
 
-				bJSON, _ := json.Marshal(buyerNode)
-				sJSON, _ := json.Marshal(sellerNode)
-				ctx.GetStub().PutState(buyOrder.Owner, bJSON)
-				ctx.GetStub().PutState(sellOrder.Owner, sJSON)
-			}
-		}
-	}
+// Enterprise P2P Trade: Create (Lock Energy)
+func (s *SmartContract) CreateP2PTrade(ctx contractapi.TransactionContextInterface, tradeID string, sellerID string, quantity int, price int) error {
+    // 1. Lock Seller Energy
+    seller, err := s.GetNode(ctx, sellerID)
+    if err != nil { return fmt.Errorf("seller not found") }
 
-	var activeOrders []Order
-	for _, o := range orders {
-		if o.Quantity > 0 { activeOrders = append(activeOrders, o) }
-	}
-	return activeOrders
+    if seller.EnergyBalance < quantity { return fmt.Errorf("insufficient energy balance") }
+
+    seller.EnergyBalance -= quantity
+    seller.LockedEnergy += quantity
+    seller.LastAction = fmt.Sprintf("P2P Trade Created: %s", tradeID)
+
+    // Save Seller
+    sJSON, _ := json.Marshal(seller)
+    ctx.GetStub().PutState(sellerID, sJSON)
+
+    // 2. Create Trade Record
+    trade := P2PTrade{
+        ID: tradeID, Seller: sellerID, Quantity: quantity, Price: price, Status: "OPEN",
+    }
+    tradeJSON, _ := json.Marshal(trade)
+    return ctx.GetStub().PutState("TRADE_"+tradeID, tradeJSON)
+}
+
+// Enterprise P2P Trade: Complete (Unlock Energy to Buyer, Transfer Tokens)
+func (s *SmartContract) CompleteP2PTrade(ctx contractapi.TransactionContextInterface, tradeID string, buyerID string) error {
+    // 1. Get Trade
+    tradeJSON, err := ctx.GetStub().GetState("TRADE_"+tradeID)
+    if err != nil || tradeJSON == nil { return fmt.Errorf("trade not found") }
+    var trade P2PTrade
+    json.Unmarshal(tradeJSON, &trade)
+
+    if trade.Status != "OPEN" { return fmt.Errorf("trade not open") }
+
+    // 2. Get Buyer and Seller
+    buyer, err := s.GetNode(ctx, buyerID)
+    if err != nil { return fmt.Errorf("buyer not found") }
+
+    seller, err := s.GetNode(ctx, trade.Seller)
+    if err != nil { return fmt.Errorf("seller not found") }
+
+    // 3. Check Buyer Funds
+    cost := trade.Price * trade.Quantity
+    if buyer.TokenBalance < cost { return fmt.Errorf("insufficient buyer tokens") }
+
+    // 4. Transfer
+    buyer.TokenBalance -= cost
+    buyer.EnergyBalance += trade.Quantity
+    buyer.LastAction = fmt.Sprintf("P2P Trade Completed: %s", tradeID)
+
+    seller.TokenBalance += cost
+    seller.LockedEnergy -= trade.Quantity
+    seller.LastAction = fmt.Sprintf("P2P Trade Completed: %s", tradeID)
+
+    // 5. Save States
+    bJSON, _ := json.Marshal(buyer)
+    sJSON, _ := json.Marshal(seller)
+    ctx.GetStub().PutState(buyerID, bJSON)
+    ctx.GetStub().PutState(trade.Seller, sJSON)
+
+    // 6. Close Trade
+    trade.Status = "COMPLETED"
+    newTradeJSON, _ := json.Marshal(trade)
+    return ctx.GetStub().PutState("TRADE_"+tradeID, newTradeJSON)
 }
 
 func main() {

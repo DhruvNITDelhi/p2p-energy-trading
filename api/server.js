@@ -1,102 +1,174 @@
 const express = require('express');
 const cors = require('cors');
-const { connect, signers } = require('@hyperledger/fabric-gateway');
-const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const grpc = require('@grpc/grpc-js');
+
+const config = require('./config');
+const wallet = require('./services/wallet');
+const auth = require('./services/auth');
+const blockchain = require('./services/blockchain');
+const matcher = require('./services/matcher');
+const telemetry = require('./services/telemetry'); // New
+const becknRoutes = require('./routes/beckn'); // New
+const initAdmin = require('./initAdmin');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public')); // Serves your UI
+app.use(express.static('public'));
 
-const AUTH_TOKEN = "EnergyAdmin2026"; 
+// --- Beckn Protocol Stubs ---
+app.use('/beckn', becknRoutes);
 
-// --- Blockchain Config (Auto-Discover Keys) ---
-const cryptoPath = path.resolve(__dirname, '..', 'fabric-samples', 'test-network', 'organizations', 'peerOrganizations', 'org1.example.com');
-const tlsCertPath = path.resolve(cryptoPath, 'peers', 'peer0.org1.example.com', 'tls', 'ca.crt');
-
-// 1. AUTO-DISCOVER CERTIFICATE
-const certDir = path.resolve(cryptoPath, 'users', 'Admin@org1.example.com', 'msp', 'signcerts');
-const certFile = fs.readdirSync(certDir)[0]; // Grabs whatever file is inside automatically
-const certPath = path.resolve(certDir, certFile);
-
-// 2. AUTO-DISCOVER PRIVATE KEY
-const keyDirectoryPath = path.resolve(cryptoPath, 'users', 'Admin@org1.example.com', 'msp', 'keystore');
-const keyFile = fs.readdirSync(keyDirectoryPath)[0];
-const keyPath = path.resolve(keyDirectoryPath, keyFile);
-
-// --- Helper to Connect to Blockchain ---
-async function getContract() {
-    const tlsRootCert = fs.readFileSync(tlsCertPath);
-    const client = new grpc.Client('localhost:7051', grpc.credentials.createSsl(tlsRootCert), { 'grpc.ssl_target_name_override': 'peer0.org1.example.com' });
-    
-    const gateway = connect({ 
-        client, 
-        identity: { mspId: 'Org1MSP', credentials: fs.readFileSync(certPath) }, 
-        signer: signers.newPrivateKeySigner(crypto.createPrivateKey(fs.readFileSync(keyPath))) 
-    });
-    
-    return { contract: gateway.getNetwork('mychannel').getContract('energy'), gateway, client };
-}
-
-// --- API ROUTES ---
-
-// 1. GET BALANCE ROUTE
-app.get('/api/node/:id', async (req, res) => {
-    const { contract, gateway, client } = await getContract();
+// --- Telemetry Endpoint (IoT) ---
+app.post('/api/telemetry', async (req, res) => {
     try {
-        const resultBytes = await contract.evaluateTransaction('GetNode', req.params.id);
-        res.json(JSON.parse(new TextDecoder().decode(resultBytes)));
-    } catch (e) { res.status(500).send({error: e.message}); }
-    finally { gateway.close(); client.close(); }
+        const { panelId, payload } = req.body; // payload: { voltage, current, tokensGenerated }
+        const result = await telemetry.ingest(panelId, payload);
+        res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 2. GET ORDER BOOK ROUTE
+// --- Auth Routes ---
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        const result = await auth.login(username, password);
+        res.json(result);
+    } catch (e) {
+        res.status(401).json({ error: e.message });
+    }
+});
+
+// 1. REGISTER NEW USER (Admin Only)
+app.post('/api/auth/register', auth.verifyToken, auth.isAdmin, async (req, res) => {
+    try {
+        const { username, password, role } = req.body;
+        if (!username || !password) return res.status(400).json({ error: "Missing username or password" });
+
+        await auth.register(username, password, role || 'user');
+        res.json({ message: `User ${username} registered successfully` });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// 2. GET BALANCE
+app.get('/api/node/me', auth.verifyToken, async (req, res) => {
+    try {
+        const username = req.user.username;
+        const { contract, gateway, client } = await blockchain.getContract(username);
+        try {
+            const resultBytes = await contract.evaluateTransaction('GetNode', username);
+            res.json(JSON.parse(new TextDecoder().decode(resultBytes)));
+        } finally { gateway.close(); client.close(); }
+    } catch (e) { res.status(500).send({error: e.message}); }
+});
+
+// 3. PLACE ORDER
+app.post('/api/order', auth.verifyToken, async (req, res) => {
+    try {
+        const username = req.user.username;
+        const { id, orderType, price, quantity } = req.body;
+
+        const { contract, gateway, client } = await blockchain.getContract(username);
+        try {
+            await contract.submitTransaction('PlaceOrder', id, username, orderType, price.toString(), quantity.toString());
+        } finally { gateway.close(); client.close(); }
+
+        await matcher.addOrder({
+            id,
+            owner: username,
+            orderType,
+            price: parseInt(price),
+            quantity: parseInt(quantity),
+            timestamp: Date.now()
+        });
+
+        res.json({ message: "Order Placed & Queued for Matching!" });
+    } catch (e) { res.status(500).send({error: e.message}); }
+});
+
+// 4. MINT ASSETS (Admin Only - Replaces Recharge)
+app.post('/api/admin/mint', auth.verifyToken, auth.isAdmin, async (req, res) => {
+    try {
+        const { contract, gateway, client } = await blockchain.getContract(req.user.username);
+        try {
+            const { id, amount } = req.body;
+            // Calls OracleMintAssets in Chaincode
+            await contract.submitTransaction('OracleMintAssets', id, amount.toString());
+            res.json({ message: "Assets Minted via Oracle Contract!" });
+        } finally { gateway.close(); client.close(); }
+    } catch (e) { res.status(500).send({error: e.message}); }
+});
+
+// 5. GET ALL USERS (Admin Only)
+app.get('/api/admin/users', auth.verifyToken, auth.isAdmin, async (req, res) => {
+    try {
+        const { contract, gateway, client } = await blockchain.getContract(req.user.username);
+        try {
+            const resultBytes = await contract.evaluateTransaction('GetAllNodes');
+            res.json(JSON.parse(new TextDecoder().decode(resultBytes)));
+        } finally { gateway.close(); client.close(); }
+    } catch (e) { res.status(500).send({error: e.message}); }
+});
+
+// 6. ORDER BOOK
 app.get('/api/orderbook', async (req, res) => {
-    const { contract, gateway, client } = await getContract();
-    try {
-        const resultBytes = await contract.evaluateTransaction('GetOrderBook');
-        const data = new TextDecoder().decode(resultBytes);
-        res.json(data ? JSON.parse(data) : []);
-    } catch (e) { res.status(500).send({error: e.message}); }
-    finally { gateway.close(); client.close(); }
+    res.json(matcher.getOrderBook());
 });
 
-// 3. PLACE LIMIT ORDER ROUTE
-app.post('/api/order', async (req, res) => {
-    if (req.headers['authorization'] !== AUTH_TOKEN) return res.status(401).json({error: "Unauthorized"});
-    const { contract, gateway, client } = await getContract();
+// 7. HISTORY
+app.get('/api/history/:id', auth.verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin' && req.user.username !== req.params.id) {
+        return res.status(403).json({ error: "Access Denied" });
+    }
     try {
-        const { id, owner, orderType, price, quantity } = req.body;
-        await contract.submitTransaction('PlaceOrder', id, owner, orderType, price.toString(), quantity.toString());
-        res.json({ message: "Order Placed & Matching Engine Triggered!" });
+        const { contract, gateway, client } = await blockchain.getContract(req.user.username);
+        try {
+            const resultBytes = await contract.evaluateTransaction('GetNodeHistory', req.params.id);
+            res.json(JSON.parse(new TextDecoder().decode(resultBytes)));
+        } finally { gateway.close(); client.close(); }
     } catch (e) { res.status(500).send({error: e.message}); }
-    finally { gateway.close(); client.close(); }
 });
 
-// 4. SECURE RECHARGE ROUTE
-app.post('/api/recharge', async (req, res) => {
-    if (req.headers['authorization'] !== AUTH_TOKEN) return res.status(401).json({error: "Unauthorized"});
-    const { contract, gateway, client } = await getContract();
+// 8. ESCROW TRADE CREATION (Enterprise P2P)
+app.post('/api/trade/create', auth.verifyToken, async (req, res) => {
     try {
-        const { id, amount } = req.body;
-        await contract.submitTransaction('RechargeNode', id, amount.toString());
-        res.json({ message: "Recharge Success!" });
+        const username = req.user.username;
+        const { tradeID, quantity, price } = req.body;
+        // Note: Seller creates trade (locks energy).
+        // tradeID should be unique.
+
+        const { contract, gateway, client } = await blockchain.getContract(username);
+        try {
+             await contract.submitTransaction('CreateP2PTrade', tradeID, username, quantity.toString(), price.toString());
+             res.json({ message: "P2P Trade Created & Energy Locked" });
+        } finally { gateway.close(); client.close(); }
     } catch (e) { res.status(500).send({error: e.message}); }
-    finally { gateway.close(); client.close(); }
 });
 
-// 5. GET TRANSACTION HISTORY
-app.get('/api/history/:id', async (req, res) => {
-    const { contract, gateway, client } = await getContract();
+// 9. ESCROW TRADE COMPLETION
+app.post('/api/trade/complete', auth.verifyToken, async (req, res) => {
     try {
-        const resultBytes = await contract.evaluateTransaction('GetNodeHistory', req.params.id);
-        res.json(JSON.parse(new TextDecoder().decode(resultBytes)));
+        const username = req.user.username; // Buyer
+        const { tradeID } = req.body;
+
+        const { contract, gateway, client } = await blockchain.getContract(username);
+        try {
+             await contract.submitTransaction('CompleteP2PTrade', tradeID, username);
+             res.json({ message: "P2P Trade Completed & Tokens Transferred" });
+        } finally { gateway.close(); client.close(); }
     } catch (e) { res.status(500).send({error: e.message}); }
-    finally { gateway.close(); client.close(); }
 });
 
-// Start Server
-app.listen(3000, () => console.log("⚡ EnergyConnect API Live on Port 3000"));
+// Async Initialization before starting server
+(async () => {
+    try {
+        await initAdmin(); // Ensure Admin exists
+        app.listen(config.PORT, () => console.log(`⚡ EnergyConnect API Live on Port ${config.PORT}`));
+    } catch (e) {
+        console.error("Critical: Failed to initialize Admin. Server shutting down.", e);
+        process.exit(1);
+    }
+})();
